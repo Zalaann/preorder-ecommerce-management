@@ -1,0 +1,16 @@
+# Build output
+.next/
+out/
+
+# Node modules
+node_modules/
+
+# Public assets
+public/
+
+# Environment variables
+.env*
+
+# TypeScript cache
+*.tsbuildinfo
+next-env.d.ts 
