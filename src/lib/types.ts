@@ -2,7 +2,7 @@
 export type OrderStatus = 'pending' | 'ordered' | 'shipped' | 'delivered' | 'cancelled' | 'Out_of_stock';
 export type FlightStatus = 'scheduled' | 'in_transit' | 'arrived' | 'delayed' | 'in_progress' | 'completed' | 'cancelled';
 export type PaymentPurpose = 'advance' | 'final_remaining' | 'delivery_charges';
-export type BankAccount = 'Ibrahim_Hbl' | 'Fatima_hbl' | 'Fatima_jazzcash' | 'Fatima_Easypaisa';
+export type BankAccount = 'HBL' | 'Meezan' | 'JazzCash' | 'EasyPaisa';
 
 // Reminder related types
 export type ReminderStatus = 'Pending' | 'In Progress' | 'Completed';

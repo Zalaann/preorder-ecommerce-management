@@ -78,7 +78,7 @@ const PaymentAddEditModal: React.FC<PaymentAddEditModalProps> = ({
     preorder_id: '',
     amount: 0,
     payment_purpose: 'advance',
-    bank_account: 'Ibrahim_Hbl',
+    bank_account: 'HBL',
     tally: false,
     payment_screenshot: '',
     payment_date: new Date().toISOString().split('T')[0],
@@ -155,7 +155,7 @@ const PaymentAddEditModal: React.FC<PaymentAddEditModalProps> = ({
           preorder_id: '',
           amount: 0,
           payment_purpose: 'advance',
-          bank_account: 'Ibrahim_Hbl',
+          bank_account: 'HBL',
           tally: false,
           payment_screenshot: '',
           payment_date: new Date().toISOString().split('T')[0],
@@ -1198,10 +1198,10 @@ const PaymentAddEditModal: React.FC<PaymentAddEditModalProps> = ({
                         <SelectValue placeholder="Select bank account" />
                       </SelectTrigger>
                       <SelectContent className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
-                        <SelectItem value="Ibrahim_Hbl">Ibrahim HBL</SelectItem>
-                        <SelectItem value="Fatima_hbl">Fatima HBL</SelectItem>
-                        <SelectItem value="Fatima_jazzcash">Fatima JazzCash</SelectItem>
-                        <SelectItem value="Fatima_Easypaisa">Fatima EasyPaisa</SelectItem>
+                        <SelectItem value="HBL">HBL</SelectItem>
+                        <SelectItem value="Meezan">Meezan</SelectItem>
+                        <SelectItem value="JazzCash">JazzCash</SelectItem>
+                        <SelectItem value="EasyPaisa">EasyPaisa</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

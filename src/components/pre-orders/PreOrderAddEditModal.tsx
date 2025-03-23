@@ -121,7 +121,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
   const [isLoadingReminders, setIsLoadingReminders] = useState(false);
 
   // Add bank account state
-  const [bankAccount, setBankAccount] = useState<BankAccount>('Ibrahim_Hbl');
+  const [bankAccount, setBankAccount] = useState<BankAccount>('HBL');
 
   // Load flights directly from database if not provided
   const loadFlights = async () => {
@@ -316,7 +316,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
         }]);
         
         // Reset bank account to default
-        setBankAccount('Ibrahim_Hbl');
+        setBankAccount('HBL');
       }
       
       // Reset errors
@@ -1476,10 +1476,10 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                       disabled={isSubmitting}
                       className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-brand"
                     >
-                      <option value="Ibrahim_Hbl">Ibrahim HBL</option>
-                      <option value="Fatima_hbl">Fatima HBL</option>
-                      <option value="Fatima_jazzcash">Fatima JazzCash</option>
-                      <option value="Fatima_Easypaisa">Fatima EasyPaisa</option>
+                      <option value="HBL">HBL</option>
+                      <option value="Meezan">Meezan</option>
+                      <option value="JazzCash">JazzCash</option>
+                      <option value="EasyPaisa">EasyPaisa</option>
                     </select>
                   </div>
                 )}

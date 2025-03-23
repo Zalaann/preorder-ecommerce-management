@@ -35,10 +35,10 @@ COMMENT ON SCHEMA public IS 'standard public schema';
 --
 
 CREATE TYPE public.bank_account AS ENUM (
-    'Ibrahim_Hbl',
-    'Fatima_hbl',
-    'Fatima_jazzcash',
-    'Fatima_Easypaisa'
+    'HBL',
+    'Meezan',
+    'JazzCash',
+    'EasyPaisa'
 );
 
 

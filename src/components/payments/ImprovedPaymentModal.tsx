@@ -79,7 +79,7 @@ const ImprovedPaymentModal: React.FC<ImprovedPaymentModalProps> = ({
     preorder_id: '',
     amount: 0,
     payment_purpose: 'advance',
-    bank_account: 'Ibrahim_Hbl',
+    bank_account: 'HBL',
     tally: false,
     payment_screenshot: '',
     payment_date: new Date().toISOString().split('T')[0],
@@ -157,7 +157,7 @@ const ImprovedPaymentModal: React.FC<ImprovedPaymentModalProps> = ({
           preorder_id: '',
           amount: 0,
           payment_purpose: 'advance',
-          bank_account: 'Ibrahim_Hbl',
+          bank_account: 'HBL',
           tally: false,
           payment_screenshot: '',
           payment_date: new Date().toISOString().split('T')[0],
@@ -1115,7 +1115,7 @@ const ImprovedPaymentModal: React.FC<ImprovedPaymentModalProps> = ({
                         <SelectTrigger id="product-select" className="w-full">
                           <SelectValue placeholder="Select a product" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
                           {selectedProducts.map((product) => (
                             <SelectItem key={product.preorder_item_id} value={product.preorder_item_id}>
                               {product.product_name} {product.shade && `(${product.shade})`} {product.size && `- ${product.size}`}
@@ -1201,11 +1201,11 @@ const ImprovedPaymentModal: React.FC<ImprovedPaymentModalProps> = ({
                           <SelectTrigger id="bank-account" className="w-full">
                             <SelectValue placeholder="Select bank account" />
                           </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Ibrahim_Hbl">Ibrahim HBL</SelectItem>
-                            <SelectItem value="Fatima_hbl">Fatima HBL</SelectItem>
-                            <SelectItem value="Fatima_jazzcash">Fatima JazzCash</SelectItem>
-                            <SelectItem value="Fatima_Easypaisa">Fatima EasyPaisa</SelectItem>
+                          <SelectContent className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
+                            <SelectItem value="HBL">HBL</SelectItem>
+                            <SelectItem value="Meezan">Meezan</SelectItem>
+                            <SelectItem value="JazzCash">JazzCash</SelectItem>
+                            <SelectItem value="EasyPaisa">EasyPaisa</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

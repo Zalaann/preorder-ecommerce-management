@@ -65,7 +65,7 @@ BEGIN
                     'advance',
                     CURRENT_DATE,
                     NEW.preorder_item_id,
-                    'Ibrahim_Hbl',
+                    'HBL',
                     FALSE,
                     '',
                     NEW.advance_payment,
