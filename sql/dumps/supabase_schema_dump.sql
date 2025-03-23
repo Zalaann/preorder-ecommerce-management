@@ -274,6 +274,130 @@ $$;
 
 
 --
+-- Name: update_payments_on_preorder_item_change(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_payments_on_preorder_item_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_customer_id TEXT;
+    v_preorder_id TEXT;
+    v_payment_id TEXT;
+    v_existing_payment_id TEXT;
+BEGIN
+    -- Get customer_id and preorder_id
+    SELECT p.customer_id, p.preorder_id
+    INTO v_customer_id, v_preorder_id
+    FROM preorders p
+    WHERE p.preorder_id = NEW.preorder_id;
+
+    -- Generate a unique payment_id
+    v_payment_id := gen_random_uuid();
+
+    -- Check if an existing payment for this preorder_item_id exists
+    SELECT payment_id INTO v_existing_payment_id
+    FROM payments
+    WHERE preorder_item_id = NEW.preorder_item_id AND is_automatic = TRUE;
+
+    IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+        -- Only proceed if there's an advance payment to track
+        IF NEW.advance_payment IS NOT NULL AND NEW.advance_payment > 0 THEN
+            -- If an existing payment exists, update it
+            IF v_existing_payment_id IS NOT NULL THEN
+                UPDATE payments
+                SET
+                    customer_id = v_customer_id,
+                    preorder_id = v_preorder_id,
+                    amount = NEW.advance_payment,
+                    payment_purpose = 'advance',
+                    payment_date = CURRENT_DATE,
+                    preorder_item_id = NEW.preorder_item_id,
+                    advance_payment = NEW.advance_payment,
+                    is_automatic = TRUE
+                WHERE payment_id = v_existing_payment_id;
+            ELSE
+                -- Otherwise, insert a new payment record
+                INSERT INTO payments (
+                    payment_id,
+                    customer_id,
+                    preorder_id,
+                    amount,
+                    payment_purpose,
+                    payment_date,
+                    preorder_item_id,
+                    bank_account,
+                    tally,
+                    payment_screenshot,
+                    advance_payment,
+                    is_automatic
+                ) VALUES (
+                    v_payment_id,
+                    v_customer_id,
+                    v_preorder_id,
+                    NEW.advance_payment,
+                    'advance',
+                    CURRENT_DATE,
+                    NEW.preorder_item_id,
+                    'Ibrahim_Hbl',
+                    FALSE,
+                    '',
+                    NEW.advance_payment,
+                    TRUE
+                );
+            END IF;
+        ELSIF v_existing_payment_id IS NOT NULL THEN
+            -- If advance_payment is 0 or NULL and we have an existing payment, delete it
+            DELETE FROM payments
+            WHERE payment_id = v_existing_payment_id;
+        END IF;
+    ELSIF TG_OP = 'DELETE' THEN
+        -- If a preorder item is deleted, delete the corresponding payment (if any)
+        IF v_existing_payment_id IS NOT NULL THEN
+            DELETE FROM payments
+            WHERE payment_id = v_existing_payment_id;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: update_preorder_totals(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_preorder_totals() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    -- Update total_amount
+    UPDATE preorders
+    SET total_amount = (
+        SELECT COALESCE(SUM(price * quantity), 0) + COALESCE(delivery_charges, 0)
+        FROM preorder_items pi
+        JOIN preorders p ON pi.preorder_id = p.preorder_id
+        WHERE pi.preorder_id = NEW.preorder_id
+        GROUP BY p.delivery_charges
+    )
+    WHERE preorder_id = NEW.preorder_id;
+
+    -- Update remaining_amount
+    UPDATE preorders
+    SET remaining_amount = (
+        SELECT total_amount - COALESCE(SUM(advance_payment), 0)
+        FROM preorder_items
+        WHERE preorder_id = NEW.preorder_id
+    )
+    WHERE preorder_id = NEW.preorder_id;
+
+    RETURN NEW;
+END;
+$$;
+
+
+--
 -- Name: update_product_details(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -362,6 +486,9 @@ CREATE TABLE public.payments (
     tally boolean DEFAULT false,
     payment_screenshot text,
     payment_date timestamp without time zone DEFAULT now(),
+    preorder_item_id uuid,
+    advance_payment numeric,
+    is_automatic boolean DEFAULT false,
     CONSTRAINT check_positive_amount CHECK ((amount >= (0)::numeric))
 );
 
@@ -379,6 +506,7 @@ CREATE TABLE public.preorder_items (
     quantity integer NOT NULL,
     link text,
     price numeric,
+    advance_payment numeric DEFAULT 0,
     CONSTRAINT preorder_items_quantity_check CHECK ((quantity > 0))
 );
 
@@ -393,14 +521,12 @@ CREATE TABLE public.preorders (
     flight_id uuid,
     order_status public.order_status DEFAULT 'pending'::public.order_status,
     subtotal numeric(10,2) NOT NULL,
-    advance_payment numeric(10,2) NOT NULL,
-    cod_amount numeric(10,2) NOT NULL,
+    delivery_charges numeric(10,2) NOT NULL,
     created_at timestamp without time zone DEFAULT now(),
     total_amount numeric(10,2),
     remaining_amount numeric(10,2) DEFAULT 0,
     add_reminder boolean DEFAULT false,
-    CONSTRAINT check_positive_advance_payment CHECK ((advance_payment >= (0)::numeric)),
-    CONSTRAINT check_positive_cod_amount CHECK ((cod_amount >= (0)::numeric)),
+    CONSTRAINT check_positive_cod_amount CHECK ((delivery_charges >= (0)::numeric)),
     CONSTRAINT check_positive_subtotal CHECK ((subtotal >= (0)::numeric))
 );
 
@@ -735,6 +861,20 @@ CREATE TRIGGER trigger_set_preorder_id BEFORE INSERT ON public.preorders FOR EAC
 
 
 --
+-- Name: preorder_items trigger_update_payments_on_preorder_item_change; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_update_payments_on_preorder_item_change AFTER INSERT OR DELETE OR UPDATE ON public.preorder_items FOR EACH ROW EXECUTE FUNCTION public.update_payments_on_preorder_item_change();
+
+
+--
+-- Name: preorder_items trigger_update_preorder_totals; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_update_preorder_totals AFTER INSERT OR DELETE OR UPDATE ON public.preorder_items FOR EACH ROW EXECUTE FUNCTION public.update_preorder_totals();
+
+
+--
 -- Name: labels labels_flight_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -842,238 +982,6 @@ CREATE POLICY "Allow all operations for now" ON public.users USING (true);
 --
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-
---
--- Name: SCHEMA public; Type: ACL; Schema: -; Owner: -
---
-
-GRANT USAGE ON SCHEMA public TO postgres;
-GRANT USAGE ON SCHEMA public TO anon;
-GRANT USAGE ON SCHEMA public TO authenticated;
-GRANT USAGE ON SCHEMA public TO service_role;
-
-
---
--- Name: FUNCTION create_label_on_request(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.create_label_on_request() TO anon;
-GRANT ALL ON FUNCTION public.create_label_on_request() TO authenticated;
-GRANT ALL ON FUNCTION public.create_label_on_request() TO service_role;
-
-
---
--- Name: FUNCTION generate_custom_id(table_name text, column_name text, prefix text); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.generate_custom_id(table_name text, column_name text, prefix text) TO anon;
-GRANT ALL ON FUNCTION public.generate_custom_id(table_name text, column_name text, prefix text) TO authenticated;
-GRANT ALL ON FUNCTION public.generate_custom_id(table_name text, column_name text, prefix text) TO service_role;
-
-
---
--- Name: FUNCTION handle_new_user(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.handle_new_user() TO anon;
-GRANT ALL ON FUNCTION public.handle_new_user() TO authenticated;
-GRANT ALL ON FUNCTION public.handle_new_user() TO service_role;
-
-
---
--- Name: FUNCTION normalize_phone_number(phone text); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.normalize_phone_number(phone text) TO anon;
-GRANT ALL ON FUNCTION public.normalize_phone_number(phone text) TO authenticated;
-GRANT ALL ON FUNCTION public.normalize_phone_number(phone text) TO service_role;
-
-
---
--- Name: FUNCTION set_customer_id(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.set_customer_id() TO anon;
-GRANT ALL ON FUNCTION public.set_customer_id() TO authenticated;
-GRANT ALL ON FUNCTION public.set_customer_id() TO service_role;
-
-
---
--- Name: FUNCTION set_payment_id(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.set_payment_id() TO anon;
-GRANT ALL ON FUNCTION public.set_payment_id() TO authenticated;
-GRANT ALL ON FUNCTION public.set_payment_id() TO service_role;
-
-
---
--- Name: FUNCTION set_preorder_id(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.set_preorder_id() TO anon;
-GRANT ALL ON FUNCTION public.set_preorder_id() TO authenticated;
-GRANT ALL ON FUNCTION public.set_preorder_id() TO service_role;
-
-
---
--- Name: FUNCTION update_product_details(); Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON FUNCTION public.update_product_details() TO anon;
-GRANT ALL ON FUNCTION public.update_product_details() TO authenticated;
-GRANT ALL ON FUNCTION public.update_product_details() TO service_role;
-
-
---
--- Name: TABLE customers; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.customers TO anon;
-GRANT ALL ON TABLE public.customers TO authenticated;
-GRANT ALL ON TABLE public.customers TO service_role;
-
-
---
--- Name: TABLE flights; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.flights TO anon;
-GRANT ALL ON TABLE public.flights TO authenticated;
-GRANT ALL ON TABLE public.flights TO service_role;
-
-
---
--- Name: TABLE labels; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.labels TO anon;
-GRANT ALL ON TABLE public.labels TO authenticated;
-GRANT ALL ON TABLE public.labels TO service_role;
-
-
---
--- Name: TABLE payments; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.payments TO anon;
-GRANT ALL ON TABLE public.payments TO authenticated;
-GRANT ALL ON TABLE public.payments TO service_role;
-
-
---
--- Name: TABLE preorder_items; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.preorder_items TO anon;
-GRANT ALL ON TABLE public.preorder_items TO authenticated;
-GRANT ALL ON TABLE public.preorder_items TO service_role;
-
-
---
--- Name: TABLE preorders; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.preorders TO anon;
-GRANT ALL ON TABLE public.preorders TO authenticated;
-GRANT ALL ON TABLE public.preorders TO service_role;
-
-
---
--- Name: TABLE reminders; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.reminders TO anon;
-GRANT ALL ON TABLE public.reminders TO authenticated;
-GRANT ALL ON TABLE public.reminders TO service_role;
-
-
---
--- Name: TABLE transactions; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.transactions TO anon;
-GRANT ALL ON TABLE public.transactions TO authenticated;
-GRANT ALL ON TABLE public.transactions TO service_role;
-
-
---
--- Name: SEQUENCE transactions_transaction_id_seq; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON SEQUENCE public.transactions_transaction_id_seq TO anon;
-GRANT ALL ON SEQUENCE public.transactions_transaction_id_seq TO authenticated;
-GRANT ALL ON SEQUENCE public.transactions_transaction_id_seq TO service_role;
-
-
---
--- Name: TABLE users; Type: ACL; Schema: public; Owner: -
---
-
-GRANT ALL ON TABLE public.users TO anon;
-GRANT ALL ON TABLE public.users TO authenticated;
-GRANT ALL ON TABLE public.users TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES  TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON SEQUENCES  TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS  TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR FUNCTIONS; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON FUNCTIONS  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON FUNCTIONS  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON FUNCTIONS  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON FUNCTIONS  TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES  TO service_role;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: -
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES  TO postgres;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES  TO anon;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES  TO authenticated;
-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public GRANT ALL ON TABLES  TO service_role;
-
 
 --
 -- PostgreSQL database dump complete

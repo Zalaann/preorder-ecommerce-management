@@ -1,34 +1,27 @@
-# Preorder E-commerce Management System
+# PreOrder E-Commerce Management System
 
-A modern e-commerce management system built with Next.js, TypeScript, Tailwind CSS, and Supabase for authentication and database.
+A comprehensive management system for pre-orders with advanced features for tracking customer orders, payments, shipping, and inventory.
 
-## Features
+## Key Features
 
-- Next.js with TypeScript for maintainability
-- Tailwind CSS for a modern, responsive UI
-- Supabase Auth for email/password login
-- Dark mode support
-- Framer Motion for smooth UI animations
-- React Hook Form + Zod for form validation
-- Modern UI with glassmorphism design
-- Comprehensive pre-order management system
-- Customer management with CRUD operations
-- Flight scheduling and tracking
-- Payment processing and tracking
-- Reminder system with Kanban board
-- Role-based access control (Admin and Employee roles)
-- Advanced filtering and sorting capabilities
-- Responsive data tables with pagination
+- **Pre-Order Management**: Create, track, and update pre-orders with detailed product information
+- **Customer Management**: Maintain customer database with contact information and purchase history
+- **Payment Tracking**: Track advance payments and remaining balances with automatic payment records
+- **Flight/Shipment Tracking**: Organize orders by shipping flight for efficient logistics
+- **Role-Based Access**: Admin and employee roles with appropriate permissions
+- **Responsive UI**: Works on desktop and mobile devices
 
-## Getting Started
+## Automatic Payment System
 
-### Prerequisites
+This system includes an automatic payment tracking feature that creates payment records when advance payments are added to products in pre-orders. The SQL trigger function `update_payments_on_preorder_item_change()` handles this functionality.
 
-- Node.js 18.x or later
-- npm or yarn
-- Supabase account and project
+Key aspects of the payment system:
+- Automatically creates payment records when products are added with advance payments
+- Updates existing payment records when product advance payments are modified
+- Deletes payment records when products are removed or advance payments are set to zero
+- Tracks individual product advance payments to maintain accurate financial records
 
-### Installation
+## Installation
 
 1. Clone the repository:
 
@@ -41,132 +34,30 @@ cd preorder-ecommerce-management
 
 ```bash
 npm install
-# or
-yarn install
 ```
 
-3. Copy `.env.local.example` to `.env.local` and update with your Supabase credentials:
-
-```bash
-cp .env.local.example .env.local
-```
-
-Then edit `.env.local` with your actual credentials:
-```
-NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-```
+3. Set up environment variables:
+- Copy `.env.local.example` to `.env.local`
+- Add your Supabase URL and anon key
 
 4. Set up the database:
-
-Import the `supabase_schema.sql` file into your Supabase project using the SQL Editor. This will create all the necessary tables, functions, and triggers.
+- Option 1: Import the complete schema dump from `sql/dumps/supabase_schema_dump.sql` into your Supabase project
+- Option 2: Run the individual SQL scripts in the `sql` directory, particularly `payment_trigger.sql` to set up the automatic payment system
 
 5. Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser.
+## Technologies Used
 
-## Project Structure
-
-```
-/preorder-ecommerce-management
-│── /src
-│   ├── /app
-│   │   ├── page.tsx  → Redirects to /auth or /dashboard based on auth state
-│   │   ├── /auth
-│   │   │   ├── page.tsx  → Login & Signup page
-│   │   ├── /admin
-│   │   │   ├── page.tsx  → Admin dashboard
-│   │   │   ├── /customers
-│   │   │   │   ├── page.tsx  → Customer management
-│   │   │   ├── /pre-orders
-│   │   │   │   ├── page.tsx  → Pre-order management
-│   │   │   ├── /flights
-│   │   │   │   ├── page.tsx  → Flight management
-│   │   │   ├── /payments
-│   │   │   │   ├── page.tsx  → Payment management
-│   │   │   ├── /reminders
-│   │   │   │   ├── page.tsx  → Reminder management
-│   │   ├── /employee
-│   │   │   ├── page.tsx  → Employee dashboard
-│   │   │   ├── /pre-orders
-│   │   │   │   ├── page.tsx  → Pre-order management (employee view)
-│   │   │   ├── /payments
-│   │   │   │   ├── page.tsx  → Payment management (employee view)
-│   │   │   ├── /reminders
-│   │   │   │   ├── page.tsx  → Reminder management (employee view)
-│   ├── /components
-│   │   ├── /ui  → Shadcn UI components
-│   │   ├── /customers
-│   │   │   ├── CustomerAddEditModal.tsx
-│   │   ├── /pre-orders
-│   │   │   ├── PreOrderAddEditModal.tsx
-│   │   │   ├── PreOrderDetailModal.tsx
-│   │   ├── /flights
-│   │   │   ├── FlightAddEditModal.tsx
-│   │   ├── /payments
-│   │   │   ├── PaymentAddEditModal.tsx
-│   │   │   ├── PaymentDetailModal.tsx
-│   │   ├── /reminders
-│   │   │   ├── ReminderCard.tsx
-│   │   │   ├── KanbanBoard.tsx
-│   ├── /lib
-│   │   ├── supabase.ts  → Initializes Supabase client
-│   │   ├── types.ts  → TypeScript type definitions
-│   │   ├── utils.ts  → Utility functions
-│   │   ├── api.ts  → API functions
-│   ├── /utils
-│   │   ├── userRoles.ts  → Role-based access control functions
-│   ├── middleware.ts  → Supabase auth middleware
-```
-
-## Database Schema
-
-The application uses Supabase with the following main tables:
-- `customers`: Store customer information
-- `flights`: Manage flight schedules
-- `preorders`: Track pre-orders with customer and flight relationships
-- `preorder_items`: Store items within pre-orders
-- `payments`: Track payments related to pre-orders
-- `reminders`: Store reminders for tasks and follow-ups
-- `users`: Store user information and roles
-
-The complete database schema is available in the `supabase_schema.sql` file. To set up the database:
-
-1. Create a new Supabase project
-2. Go to the SQL Editor in the Supabase dashboard
-3. Copy and paste the entire contents of the `supabase_schema.sql` file
-4. Run the SQL to create the complete database schema
-
-## Role-Based Access Control
-
-The application implements role-based access control (RBAC) to manage user permissions:
-
-### User Roles
-
-- **Admin**: Full access to all features, including user management
-- **Employee**: Limited access to basic features
-
-### Implementation Details
-
-1. **Users Table**: Connected to Supabase Auth to store role information
-2. **Automatic User Creation**: New users are automatically assigned the employee role
-3. **Role-Based UI**: Different navigation and features based on user role
-4. **User Management**: Admins can manage users and their roles
-
-## Deployment
-
-This project can be deployed on Vercel, Netlify, or any other platform that supports Next.js. Make sure to:
-
-1. Set up your environment variables in your deployment platform
-2. Configure your Supabase project settings
-3. Import the database schema into your Supabase project
+- **Frontend**: Next.js, React, TypeScript, Tailwind CSS
+- **Backend**: Next.js API Routes, Supabase
+- **Database**: PostgreSQL (via Supabase)
+- **Authentication**: Supabase Auth
+- **Styling**: Tailwind CSS, Shadcn UI
 
 ## License
 
-This project is licensed under the MIT License.
+MIT

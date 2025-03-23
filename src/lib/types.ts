@@ -1,7 +1,7 @@
 // Pre-order related types
 export type OrderStatus = 'pending' | 'ordered' | 'shipped' | 'delivered' | 'cancelled' | 'Out_of_stock';
 export type FlightStatus = 'scheduled' | 'in_transit' | 'arrived' | 'delayed' | 'in_progress' | 'completed' | 'cancelled';
-export type PaymentPurpose = 'advance' | 'final_remaining' | 'cod';
+export type PaymentPurpose = 'advance' | 'final_remaining' | 'delivery_charges';
 export type BankAccount = 'Ibrahim_Hbl' | 'Fatima_hbl' | 'Fatima_jazzcash' | 'Fatima_Easypaisa';
 
 // Reminder related types
@@ -27,14 +27,15 @@ export interface Flight {
 }
 
 export interface PreOrderItem {
-  preorder_item_id: string;
+  preorder_item_id?: string;
   preorder_id: string;
   product_name: string;
-  shade: string;
-  size: string;
+  shade?: string;
+  size?: string;
+  link?: string;
   quantity: number;
   price: number;
-  link: string;
+  advance_payment?: number;
 }
 
 export interface PreOrder {
@@ -43,8 +44,7 @@ export interface PreOrder {
   flight_id?: string;
   order_status: OrderStatus;
   subtotal: number;
-  advance_payment: number;
-  cod_amount: number;
+  delivery_charges: number;
   total_amount: number;
   remaining_amount: number;
   created_at: string;
@@ -66,6 +66,9 @@ export interface Payment {
   tally: boolean;
   payment_screenshot: string;
   payment_date: string;
+  preorder_item_id?: string; // UUID linking to a specific product
+  advance_payment?: number; // Specific advance payment for the product
+  is_automatic?: boolean; // Whether this payment was automatically created by a trigger
 }
 
 export interface PaymentWithDetails extends Payment {

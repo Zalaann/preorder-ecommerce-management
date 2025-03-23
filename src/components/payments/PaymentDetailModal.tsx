@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { CreditCard, User, Package, Calendar, Banknote, Building, CheckCircle, Hash, Image, X } from 'lucide-react';
+import { CreditCard, User, Package, Calendar, Banknote, Building, CheckCircle, Hash, Image, X, DollarSign } from 'lucide-react';
 import { PaymentWithDetails, PaymentPurpose } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
@@ -26,8 +26,8 @@ const PaymentDetailModal: React.FC<PaymentDetailModalProps> = ({
         return 'Advance Payment';
       case 'final_remaining':
         return 'Final Remaining Payment';
-      case 'cod':
-        return 'Cash on Delivery';
+      case 'delivery_charges':
+        return 'Delivery Charges';
       default:
         return purpose;
     }
@@ -37,6 +37,10 @@ const PaymentDetailModal: React.FC<PaymentDetailModalProps> = ({
     <>
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden bg-transparent border-none">
+          <DialogTitle className="sr-only">Payment Details</DialogTitle>
+          <DialogDescription className="sr-only">
+            Detailed information about payment {payment.payment_id}
+          </DialogDescription>
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -90,9 +94,19 @@ const PaymentDetailModal: React.FC<PaymentDetailModalProps> = ({
                     Order ID: {payment.preorder_id || 'N/A'}
                   </p>
                   {payment.preorder && (
-                    <p className="text-gray-600 dark:text-gray-300 text-sm">
-                      Status: {payment.preorder.order_status}
-                    </p>
+                    <>
+                      <p className="text-gray-600 dark:text-gray-300 text-sm">
+                        Status: {payment.preorder.order_status}
+                      </p>
+                      {payment.preorder.remaining_amount !== undefined && payment.preorder.remaining_amount > 0 && (
+                        <div className="mt-2 flex items-center">
+                          <DollarSign className="h-4 w-4 text-amber-500 mr-2" />
+                          <p className="text-amber-600 dark:text-amber-400 font-medium">
+                            Remaining Balance: {formatCurrency(payment.preorder.remaining_amount)}
+                          </p>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
                 

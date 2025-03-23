@@ -3,12 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { PreOrderWithDetails, OrderStatus, PreOrderItem } from '@/lib/types';
 import { formatDate, formatCurrency, formatStatus } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { X, User, Plane, Package, Calendar, Banknote, CreditCard, ShoppingBag } from 'lucide-react';
+import { X, User, Plane, Package, Calendar, Banknote, CreditCard, ShoppingBag, ExternalLink } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 interface PreOrderDetailModalProps {
@@ -27,8 +27,6 @@ const PreOrderDetailModal: React.FC<PreOrderDetailModalProps> = ({
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [products, setProducts] = useState<PreOrderItem[]>([]);
-  const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false);
-  const [newStatus, setNewStatus] = useState<OrderStatus>('pending');
 
   // Fetch product items when preOrder changes
   useEffect(() => {
@@ -65,25 +63,9 @@ const PreOrderDetailModal: React.FC<PreOrderDetailModalProps> = ({
 
   if (!isOpen || !preOrder) return null;
 
-  // Handle status change from dropdown
-  const handleStatusChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setIsUpdating(true);
-    setUpdateError(null);
-    
-    try {
-      const newStatus = e.target.value as OrderStatus;
-      console.log(`Updating order status from ${preOrder.order_status} to ${newStatus}`);
-      onStatusChange(preOrder.preorder_id, newStatus);
-      setIsUpdating(false);
-    } catch (error) {
-      console.error('Error in status change handler:', error);
-      setUpdateError('Failed to update status. Please try again.');
-      setIsUpdating(false);
-    }
-  };
-
   // Calculate total amount
-  const totalAmount = preOrder.subtotal + preOrder.cod_amount;
+  const totalAmount = preOrder.total_amount || (preOrder.subtotal + preOrder.delivery_charges);
+  const totalAdvancePayment = products.reduce((sum, item) => sum + (item.advance_payment || 0), 0);
   
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -168,47 +150,6 @@ const PreOrderDetailModal: React.FC<PreOrderDetailModalProps> = ({
                 {updateError && <p className="text-sm text-destructive mt-1">{updateError}</p>}
               </div>
             </div>
-            
-            {/* Financial Info */}
-            <div className="flex items-center space-x-2">
-              <Banknote className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm text-muted-foreground">Subtotal</p>
-                <p className="font-medium">{formatCurrency(preOrder.subtotal)}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <CreditCard className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm text-muted-foreground">COD Amount</p>
-                <p className="font-medium">{formatCurrency(preOrder.cod_amount)}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <CreditCard className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm text-muted-foreground">Advance Payment</p>
-                <p className="font-medium">{formatCurrency(preOrder.advance_payment)}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <CreditCard className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm text-muted-foreground">Remaining Amount</p>
-                <p className="font-medium">{formatCurrency(preOrder.remaining_amount || (totalAmount - preOrder.advance_payment))}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-2">
-              <Banknote className="h-5 w-5 text-primary" />
-              <div>
-                <p className="text-sm text-muted-foreground">Total Amount</p>
-                <p className="font-medium font-bold">{formatCurrency(totalAmount)}</p>
-              </div>
-            </div>
           </div>
         </div>
         
@@ -216,59 +157,96 @@ const PreOrderDetailModal: React.FC<PreOrderDetailModalProps> = ({
         
         {/* Product Details */}
         <div>
-          <h3 className="font-semibold mb-2">Product Details</h3>
+          <h3 className="font-semibold mb-4">Product Details</h3>
           
           {products.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-muted">
-                    <th className="p-2 text-left">Product</th>
-                    <th className="p-2 text-left">Shade</th>
-                    <th className="p-2 text-left">Size</th>
-                    <th className="p-2 text-right">Quantity</th>
-                    <th className="p-2 text-right">Price</th>
-                    <th className="p-2 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((product, index) => (
-                    <tr key={index} className="border-b border-muted">
-                      <td className="p-2">{product.product_name}</td>
-                      <td className="p-2">{product.shade || '-'}</td>
-                      <td className="p-2">{product.size || '-'}</td>
-                      <td className="p-2 text-right">{product.quantity}</td>
-                      <td className="p-2 text-right">{formatCurrency(product.price)}</td>
-                      <td className="p-2 text-right">{formatCurrency(product.price * product.quantity)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td colSpan={5} className="p-2 text-right">Subtotal:</td>
-                    <td className="p-2 text-right">{formatCurrency(preOrder.subtotal)}</td>
-                  </tr>
-                  <tr className="font-semibold">
-                    <td colSpan={5} className="p-2 text-right">COD Amount:</td>
-                    <td className="p-2 text-right">{formatCurrency(preOrder.cod_amount)}</td>
-                  </tr>
-                  <tr className="font-semibold">
-                    <td colSpan={5} className="p-2 text-right">Advance Payment:</td>
-                    <td className="p-2 text-right">{formatCurrency(preOrder.advance_payment)}</td>
-                  </tr>
-                  <tr className="font-semibold">
-                    <td colSpan={5} className="p-2 text-right">Remaining Amount:</td>
-                    <td className="p-2 text-right">{formatCurrency(preOrder.remaining_amount || (totalAmount - preOrder.advance_payment))}</td>
-                  </tr>
-                  <tr className="font-semibold text-lg">
-                    <td colSpan={5} className="p-2 text-right">Total Amount:</td>
-                    <td className="p-2 text-right">{formatCurrency(totalAmount)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div className="space-y-4">
+              {/* Product Cards */}
+              <div className="space-y-3">
+                {products.map((product, index) => (
+                  <div key={index} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                    <div className="flex flex-col md:flex-row justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-gray-900 dark:text-white">{product.product_name}</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                          {product.shade && (
+                            <div>
+                              <span className="text-gray-500 dark:text-gray-400">Shade:</span> {product.shade}
+                            </div>
+                          )}
+                          {product.size && (
+                            <div>
+                              <span className="text-gray-500 dark:text-gray-400">Size:</span> {product.size}
+                            </div>
+                          )}
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400">Quantity:</span> {product.quantity}
+                          </div>
+                          <div>
+                            <span className="text-gray-500 dark:text-gray-400">Price:</span> {formatCurrency(product.price)}
+                          </div>
+                          {(product.advance_payment ?? 0) > 0 && (
+                            <div className="col-span-2">
+                              <span className="text-green-600 dark:text-green-400 font-medium">
+                                Advance Payment: {formatCurrency(product.advance_payment ?? 0)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        {product.link && (
+                          <div className="mt-2">
+                            <a 
+                              href={product.link.startsWith('http') ? product.link : `https://${product.link}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-blue-600 dark:text-blue-400 text-sm hover:underline flex items-center"
+                            >
+                              <ExternalLink className="h-3 w-3 mr-1" />
+                              View Product Link
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                      <div className="md:ml-4 mt-4 md:mt-0 text-right">
+                        <p className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(product.price * product.quantity)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Order Summary */}
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-5 border border-gray-200 dark:border-gray-700">
+                <h4 className="font-semibold mb-3 text-gray-900 dark:text-white">Order Summary</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between py-1">
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(preOrder.subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-gray-600 dark:text-gray-400">Delivery Charges:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCurrency(preOrder.delivery_charges)}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-gray-600 dark:text-gray-400">Total Advance Payment:</span>
+                    <span className="font-medium text-green-600 dark:text-green-400">{formatCurrency(totalAdvancePayment)}</span>
+                  </div>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between py-1">
+                    <span className="font-semibold text-gray-900 dark:text-white">Total Amount:</span>
+                    <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(totalAmount)}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="font-semibold text-gray-900 dark:text-white">Remaining Amount:</span>
+                    <span className="font-bold text-primary">{formatCurrency(preOrder.remaining_amount || 0)}</span>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
-            <p className="text-muted-foreground italic">No product details available</p>
+            <div className="p-6 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 text-center">
+              <p className="text-gray-500 dark:text-gray-400">No products found for this pre-order.</p>
+            </div>
           )}
         </div>
       </DialogContent>

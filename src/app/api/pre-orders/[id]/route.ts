@@ -90,7 +90,7 @@ export async function PUT(
       product_details: body.product_details,
       subtotal: body.subtotal,
       advance_payment: body.advance_payment,
-      cod_amount: body.cod_amount,
+      delivery_charges: body.delivery_charges, // delivery_charges represents delivery charges
       total_amount: body.total_amount
     };
     

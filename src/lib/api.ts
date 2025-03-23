@@ -214,11 +214,13 @@ export async function getFlights(): Promise<ApiResponse<Flight[]>> {
   try {
     const { data, error } = await supabase
       .from('flights')
-      .select('*');
-    
+      .select('*')
+      .order('shipment_date', { ascending: false });
+
     if (error) throw error;
     return { data, error: null };
   } catch (error) {
+    console.error('Error fetching flights:', error);
     return { 
       data: null, 
       error: error instanceof Error ? error : new Error('Failed to fetch flights')
@@ -454,111 +456,49 @@ export const getPaymentById = async (paymentId: string) => {
   }
 };
 
-export const createPayment = async (payment: Payment) => {
+export const createPayment = async (payment: Omit<Payment, 'payment_id'>): Promise<ApiResponse<Payment>> => {
   try {
-    console.log('Creating payment with data:', payment);
+    console.log('Creating payment:', payment);
     
-    // Ensure all required fields are present
-    const requiredFields = ['payment_id', 'customer_id', 'preorder_id', 'amount', 'payment_purpose', 'payment_date'];
-    const missingFields = requiredFields.filter(field => !payment[field as keyof Payment]);
-    
-    if (missingFields.length > 0) {
-      console.error('Missing required fields:', missingFields);
-      return { data: null, error: `Missing required fields: ${missingFields.join(', ')}` };
-    }
-    
-    // Format the payment data to ensure it matches the database schema
-    const paymentData = {
-      payment_id: payment.payment_id,
-      customer_id: payment.customer_id,
-      preorder_id: payment.preorder_id,
-      amount: payment.amount,
-      payment_purpose: payment.payment_purpose,
-      bank_account: payment.bank_account || '',
-      tally: payment.tally || false,
-      payment_screenshot: payment.payment_screenshot || '',
-      payment_date: payment.payment_date
-    };
-    
-    console.log('Formatted payment data:', paymentData);
-    
-    // Start a transaction to ensure both payment creation and preorder update succeed or fail together
-    // First, get the current preorder to calculate new payment values
-    const { data: preorderData, error: preorderError } = await supabase
-      .from('preorders')
-      .select('advance_payment, remaining_amount, subtotal, cod_amount')
-      .eq('preorder_id', payment.preorder_id)
-      .single();
-    
-    if (preorderError) {
-      console.error('Error fetching preorder data:', preorderError);
-      return { data: null, error: `Failed to fetch preorder data: ${preorderError.message}` };
-    }
-    
-    if (!preorderData) {
-      console.error('No preorder found with ID:', payment.preorder_id);
-      return { data: null, error: `No preorder found with ID: ${payment.preorder_id}` };
-    }
-    
-    // Calculate new payment values
-    const currentAdvancePayment = preorderData.advance_payment || 0;
-    const currentRemainingAmount = preorderData.remaining_amount || 0;
-    const totalAmount = (preorderData.subtotal || 0) + (preorderData.cod_amount || 0);
-    
-    // Update advance payment and remaining amount based on payment purpose
-    const newAdvancePayment = currentAdvancePayment + payment.amount;
-    const newRemainingAmount = totalAmount - newAdvancePayment;
-    
-    console.log('Payment calculations:', {
-      currentAdvancePayment,
-      currentRemainingAmount,
-      totalAmount,
-      newAdvancePayment,
-      newRemainingAmount,
-      paymentAmount: payment.amount
-    });
-    
-    // Insert the payment
+    // Start a transaction
     const { data, error } = await supabase
       .from('payments')
-      .insert([paymentData])
+      .insert(payment)
       .select();
     
-    if (error) {
-      console.error('Supabase error creating payment:', error);
-      return { data: null, error: `Failed to create payment: ${error.message}` };
+    if (error) throw error;
+    
+    if (payment.preorder_id) {
+      console.log('Payment has preorder_id, updating preorder:', payment.preorder_id);
+      
+      // Fetch the current preorder data
+      const { data: preorderData, error: preorderError } = await supabase
+        .from('preorders')
+        .select('remaining_amount, subtotal, delivery_charges') 
+        .eq('preorder_id', payment.preorder_id)
+        .single();
+      
+      if (preorderError) {
+        console.error('Error fetching preorder data:', preorderError);
+        throw preorderError;
+      }
+      
+      console.log('Fetched preorder data:', preorderData);
+      
+      // The remaining amount is now calculated by the database trigger
+      // We don't need to update it manually anymore
+      
+      console.log('Payment created successfully:', data);
+      return { data: data[0], error: null };
     }
     
-    if (!data || data.length === 0) {
-      console.error('No data returned after creating payment');
-      return { data: null, error: 'No data returned after creating payment' };
-    }
-    
-    // Update the preorder with new payment values
-    const { error: updateError } = await supabase
-      .from('preorders')
-      .update({
-        advance_payment: newAdvancePayment,
-        remaining_amount: newRemainingAmount
-      })
-      .eq('preorder_id', payment.preorder_id);
-    
-    if (updateError) {
-      console.error('Error updating preorder payment information:', updateError);
-      // Even if the update fails, we've already created the payment, so return success
-      // In a production environment, you might want to roll back the payment creation
-      console.warn('Payment created but preorder update failed');
-    } else {
-      console.log('Preorder payment information updated successfully');
-    }
-    
-    console.log('Payment created successfully:', data[0]);
-    return { data: data[0] as Payment, error: null };
+    console.log('Payment created successfully:', data);
+    return { data: data[0], error: null };
   } catch (error) {
     console.error('Error creating payment:', error);
-    return { data: null, error: error instanceof Error ? error.message : 'Failed to create payment' };
+    return { data: null, error: error as Error };
   }
-};
+}
 
 export const updatePayment = async (payment: Payment) => {
   try {
@@ -744,4 +684,112 @@ export const deleteTransaction = async (transactionId: number) => {
     console.error('Error deleting transaction:', error);
     return { success: false, error: error as Error };
   }
-}; 
+};
+
+// Payment API functions with pagination
+export async function getPaymentsWithPagination(page: number = 1, pageSize: number = 20): Promise<ApiResponse<{payments: Payment[], count: number}>> {
+  try {
+    // Get the total count of payments
+    const { count, error: countError } = await supabase
+      .from('payments')
+      .select('*', { count: 'exact', head: true });
+    
+    if (countError) {
+      throw countError;
+    }
+    
+    // Calculate pagination
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    
+    // Fetch just the paginated payments with their related data
+    const { data, error } = await supabase
+      .from('payments')
+      .select(`
+        *,
+        customer:customers(*),
+        preorder:preorders(
+          *,
+          flight:flights(*)
+        )
+      `)
+      .order('payment_date', { ascending: false })
+      .range(from, to);
+    
+    if (error) {
+      console.error('Supabase error:', error);
+      throw error;
+    }
+    
+    // Transform the data to match PaymentWithDetails interface
+    const paymentsWithDetails = data?.map(payment => ({
+      ...payment,
+      preorder: payment.preorder ? {
+        ...payment.preorder,
+        customer: payment.customer // Add customer to preorder for consistency
+      } : null
+    })) || [];
+    
+    return { 
+      data: { 
+        payments: paymentsWithDetails, 
+        count: count || 0 
+      }, 
+      error: null 
+    };
+  } catch (error) {
+    console.error('Error fetching paginated payments:', error);
+    return { 
+      data: null, 
+      error: error instanceof Error ? error : new Error('Failed to fetch payments')
+    };
+  }
+}
+
+// PreOrders API functions with pagination
+export async function getPreOrdersWithPagination(page: number = 1, pageSize: number = 20): Promise<ApiResponse<{preOrders: PreOrderWithDetails[], count: number}>> {
+  try {
+    // Get the total count of pre-orders
+    const { count, error: countError } = await supabase
+      .from('preorders')
+      .select('*', { count: 'exact', head: true });
+    
+    if (countError) {
+      throw countError;
+    }
+    
+    // Calculate pagination
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    
+    // Fetch just the paginated pre-orders with their related data
+    const { data, error } = await supabase
+      .from('preorders')
+      .select(`
+        *,
+        customer:customers(*),
+        flight:flights(*)
+      `)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+    
+    if (error) {
+      console.error('Supabase error:', error);
+      throw error;
+    }
+    
+    return { 
+      data: { 
+        preOrders: data as PreOrderWithDetails[], 
+        count: count || 0 
+      }, 
+      error: null 
+    };
+  } catch (error) {
+    console.error('Error fetching paginated pre-orders:', error);
+    return { 
+      data: null, 
+      error: error instanceof Error ? error : new Error('Failed to fetch pre-orders')
+    };
+  }
+} 

@@ -177,13 +177,13 @@ const DashboardPage: React.FC = () => {
     try {
       const { data, error } = await supabase
         .from('preorders')
-        .select('cod_amount, advance_payment')
+        .select('delivery_charges') // Delivery charges
         .eq('order_status', 'pending');
       
       if (error) throw error;
       
       const total = data?.reduce((sum, order) => {
-        return sum + (order.cod_amount || 0) + (order.advance_payment || 0);
+        return sum + (order.delivery_charges || 0); // Delivery charges
       }, 0) || 0;
       
       setUnpaidAmount(total);

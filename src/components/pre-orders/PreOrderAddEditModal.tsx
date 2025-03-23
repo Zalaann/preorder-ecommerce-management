@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PreOrder, PreOrderWithDetails, Customer, Flight, OrderStatus, PreOrderItem, ReminderStatus, ReminderPriority, Reminder } from '@/lib/types';
+import { PreOrder, PreOrderWithDetails, Customer, Flight, OrderStatus, PreOrderItem, ReminderStatus, ReminderPriority, Reminder, BankAccount } from '@/lib/types';
 import { formatDate, cn } from '@/lib/utils';
 import { fetchFlights } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
@@ -26,6 +26,8 @@ interface ProductItem {
   link: string;
   quantity: number;
   price: number;
+  isNew?: boolean; // Flag to identify new products added during editing
+  advance_payment?: number; // Add advance payment field for each product
 }
 
 // Define a reminder structure
@@ -41,7 +43,7 @@ interface PreOrderAddEditModalProps {
   isOpen: boolean;
   onClose: () => void;
   preOrder: PreOrderWithDetails | null;
-  onSave: (preOrder: PreOrderWithDetails, items: ProductItem[], reminderData?: ReminderData) => void;
+  onSave: (preOrder: PreOrderWithDetails, items: ProductItem[], bankAccount: BankAccount, reminderData?: ReminderData) => void;
   isNew: boolean;
   customers: Customer[];
   flights: Flight[];
@@ -59,16 +61,16 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
   isSubmitting,
 }) => {
   // Initialize form state
-  const [formData, setFormData] = useState<Omit<PreOrder, 'total_amount'> & { customer?: Customer; flight?: Flight }>({
-    preorder_id: '',
+  const [formData, setFormData] = useState<Partial<Omit<PreOrder, 'total_amount'>> & { customer?: Customer; flight?: Flight }>({
     customer_id: '',
-    flight_id: '',
+    flight_id: '', // Keep as empty string initially
     order_status: 'pending',
     subtotal: 0,
-    advance_payment: 0,
-    cod_amount: 0,
+    delivery_charges: 0,
     remaining_amount: 0,
     created_at: new Date().toISOString(),
+    // Only include preorder_id if it exists from an existing order and it's not an empty string
+    ...(preOrder?.preorder_id && preOrder.preorder_id !== '' ? { preorder_id: preOrder.preorder_id } : {})
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -118,6 +120,9 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
   const [associatedReminders, setAssociatedReminders] = useState<Reminder[]>([]);
   const [isLoadingReminders, setIsLoadingReminders] = useState(false);
 
+  // Add bank account state
+  const [bankAccount, setBankAccount] = useState<BankAccount>('Ibrahim_Hbl');
+
   // Load flights directly from database if not provided
   const loadFlights = async () => {
     try {
@@ -160,18 +165,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
     setIsLoadingReminders(true);
     
     try {
-      // First check if the reminders table exists and its structure
-      const { data: tableInfo, error: tableError } = await supabase
-        .from('reminders')
-        .select('*')
-        .limit(1);
-      
-      console.log('Reminders table sample:', tableInfo);
-      if (tableError) {
-        console.error('Error checking reminders table:', tableError);
-      }
-      
-      // Now fetch the actual reminders for this preorder
+      // Fetch reminders with the correct column name
       const { data, error } = await supabase
         .from('reminders')
         .select('*')
@@ -179,48 +173,6 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
       
       if (error) {
         console.error('Error fetching reminders:', error);
-        
-        // Try a direct SQL query as a fallback
-        try {
-          const { data: sqlData, error: sqlError } = await supabase
-            .rpc('get_reminders_for_preorder', { preorder_id_param: preorderId });
-          
-          if (sqlError) {
-            console.error('Error with SQL fallback:', sqlError);
-          } else {
-            console.log('SQL fallback results:', sqlData);
-            if (sqlData && sqlData.length > 0) {
-              setAssociatedReminders(sqlData);
-              setIsLoadingReminders(false);
-              return;
-            }
-          }
-        } catch (sqlCatchError) {
-          console.error('Exception in SQL fallback:', sqlCatchError);
-        }
-        
-        // If SQL fallback fails, try a raw query
-        try {
-          const { data: rawData, error: rawError } = await supabase
-            .from('reminders')
-            .select('*');
-          
-          if (rawError) {
-            console.error('Error with raw query:', rawError);
-          } else {
-            console.log('All reminders:', rawData);
-            // Filter manually
-            const filteredReminders = rawData?.filter(r => r.preorder_id === preorderId);
-            console.log('Manually filtered reminders:', filteredReminders);
-            if (filteredReminders && filteredReminders.length > 0) {
-              setAssociatedReminders(filteredReminders);
-            }
-          }
-        } catch (rawCatchError) {
-          console.error('Exception in raw query:', rawCatchError);
-        }
-        
-        setIsLoadingReminders(false);
         return;
       }
       
@@ -229,64 +181,8 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
       if (data && data.length > 0) {
         setAssociatedReminders(data);
       } else {
-        console.log('No reminders found with standard query, trying alternatives...');
-        
-        // Try with alternative field names
-        const alternativeFields = ['preOrder_id', 'pre_order_id', 'pre_order', 'preorder'];
-        let foundReminders = false;
-        
-        for (const field of alternativeFields) {
-          if (foundReminders) break;
-          
-          console.log(`Trying with field: ${field}`);
-          try {
-            const { data: altData, error: altError } = await supabase
-              .from('reminders')
-              .select('*')
-              .eq(field, preorderId);
-            
-            if (altError) {
-              console.error(`Error fetching reminders with ${field}:`, altError);
-              continue;
-            }
-            
-            if (altData && altData.length > 0) {
-              console.log(`Found reminders using ${field}:`, altData);
-              setAssociatedReminders(altData);
-              foundReminders = true;
-            }
-          } catch (fieldError) {
-            console.error(`Exception trying field ${field}:`, fieldError);
-          }
-        }
-        
-        // If still no reminders found, try a final approach - get all reminders and filter client-side
-        if (!foundReminders) {
-          try {
-            const { data: allData, error: allError } = await supabase
-              .from('reminders')
-              .select('*');
-            
-            if (allError) {
-              console.error('Error fetching all reminders:', allError);
-            } else {
-              console.log('All reminders for client-side filtering:', allData);
-              // Check each reminder for any property that might match the preorder ID
-              const matchingReminders = allData?.filter(reminder => {
-                return Object.entries(reminder).some(([key, value]) => {
-                  return typeof value === 'string' && value === preorderId;
-                });
-              });
-              
-              console.log('Client-side filtered reminders:', matchingReminders);
-              if (matchingReminders && matchingReminders.length > 0) {
-                setAssociatedReminders(matchingReminders);
-              }
-            }
-          } catch (finalError) {
-            console.error('Exception in final approach:', finalError);
-          }
-        }
+        // No reminders found for this preorder
+        setAssociatedReminders([]);
       }
     } catch (error) {
       console.error('Error in fetchAssociatedReminders:', error);
@@ -298,26 +194,31 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
   // Initialize form data when modal opens or preOrder changes
   useEffect(() => {
     if (isOpen) {
-      if (preOrder) {
-        // Editing existing pre-order
-        const { total_amount, ...preOrderWithoutTotal } = preOrder;
+      if (preOrder && !isNew) {
+        // Make a copy of preOrder without total_amount property
+        const preOrderWithoutTotal = { ...preOrder } as Partial<PreOrderWithDetails>;
+        if ('total_amount' in preOrderWithoutTotal) {
+          delete preOrderWithoutTotal.total_amount;
+        }
         
-        // Set form data from preOrder
+        // Set form data
         setFormData({
           ...preOrderWithoutTotal,
-          created_at: preOrder.created_at ? new Date(preOrder.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+          created_at: preOrder.created_at 
+            ? new Date(preOrder.created_at).toISOString().split('T')[0] 
+            : new Date().toISOString().split('T')[0],
           remaining_amount: preOrderWithoutTotal.remaining_amount || 0,
         });
         
         // Set selected customer and flight
         if (preOrderWithoutTotal.customer) {
           setSelectedCustomer(preOrderWithoutTotal.customer);
-          setCustomerSearchQuery(preOrderWithoutTotal.customer.name);
+          setCustomerSearchQuery(preOrderWithoutTotal.customer.name || '');
         }
         
         if (preOrderWithoutTotal.flight) {
           setSelectedFlight(preOrderWithoutTotal.flight);
-          setFlightSearchQuery(preOrderWithoutTotal.flight.flight_name);
+          setFlightSearchQuery(preOrderWithoutTotal.flight.flight_name || '');
         }
         
         // Set products from items
@@ -329,22 +230,68 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
             size: item.size || '',
             link: item.link || '',
             quantity: item.quantity,
-            price: item.price
+            price: item.price,
+            isNew: false, // Mark existing products as not new
+            advance_payment: item.advance_payment || 0, // Include advance payment with default value
           })));
+        } else {
+          // Fetch from preorder_items if not available in preOrderWithoutTotal.items
+          const fetchPreorderItems = async () => {
+            try {
+              const { data: itemsData, error } = await supabase
+                .from('preorder_items')
+                .select('*')
+                .eq('preorder_id', preOrderWithoutTotal.preorder_id);
+              
+              if (error) {
+                console.error('Error fetching preorder items:', error);
+                return;
+              }
+              
+              if (itemsData && itemsData.length > 0) {
+                setProducts(itemsData.map(item => ({
+                  id: item.preorder_item_id || uuidv4(),
+                  product_name: item.product_name,
+                  shade: item.shade || '',
+                  size: item.size || '',
+                  link: item.link || '',
+                  quantity: item.quantity,
+                  price: item.price,
+                  isNew: false, // Mark existing products as not new
+                  advance_payment: item.advance_payment || 0, // Include advance payment with default value
+                })));
+              } else {
+                // If still no items, initialize with one empty product
+                setProducts([{
+                  id: uuidv4(),
+                  product_name: '',
+                  shade: '',
+                  size: '',
+                  link: '',
+                  quantity: 1,
+                  price: 0,
+                  isNew: true,  // Mark as new product
+                  advance_payment: 0, // Initialize advance payment
+                }]);
+              }
+            } catch (error) {
+              console.error('Error in fetchPreorderItems:', error);
+            }
+          };
+          
+          fetchPreorderItems();
         }
         
         // Fetch associated reminders
-        fetchAssociatedReminders(preOrderWithoutTotal.preorder_id);
+        fetchAssociatedReminders(preOrderWithoutTotal.preorder_id || '');
       } else {
         // Creating new pre-order
         setFormData({
-          preorder_id: '', // This will be generated by Supabase
           customer_id: '',
           flight_id: '',
           order_status: 'pending',
           subtotal: 0,
-          advance_payment: 0,
-          cod_amount: 0,
+          delivery_charges: 0,
           remaining_amount: 0,
           created_at: new Date().toISOString().split('T')[0],
         });
@@ -363,8 +310,13 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
           size: '',
           link: '',
           quantity: 1,
-          price: 0
+          price: 0,  // We keep 0 for type safety but won't display it
+          isNew: true,  // Mark as new product
+          advance_payment: 0, // Initialize advance payment
         }]);
+        
+        // Reset bank account to default
+        setBankAccount('Ibrahim_Hbl');
       }
       
       // Reset errors
@@ -405,7 +357,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
   ) => {
     const { name, value, type } = e.target as HTMLInputElement;
     
-    if (name === 'subtotal' || name === 'advance_payment' || name === 'cod_amount') {
+    if (name === 'subtotal' || name === 'delivery_charges') {
       if (value === '') {
         // Mark this field as being edited
         setEditingFields(prev => ({
@@ -496,6 +448,27 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
       }
     }
     
+    // For advance_payment field, handle conversion to number
+    if (field === 'advance_payment') {
+      if (value === '') {
+        // Mark this field as being edited
+        setEditingFields(prev => ({
+          ...prev,
+          [`advance-${id}`]: true,
+        }));
+        // Don't update with 0, just return to keep the previous value
+        return;
+      } else {
+        // Remove from editing fields
+        setEditingFields(prev => ({
+          ...prev,
+          [`advance-${id}`]: false,
+        }));
+        // Convert to number for advance payment and ensure it's not negative
+        value = Math.max(0, parseFloat(value as string) || 0);
+      }
+    }
+    
     // Update the product
     setProducts(prevProducts => 
       prevProducts.map(product => 
@@ -528,7 +501,9 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
         size: '',
         link: '',
         quantity: 1,
-        price: 0
+        price: 0,
+        isNew: true,  // Mark as new product
+        advance_payment: 0, // Initialize advance payment
       }
     ]);
   };
@@ -599,98 +574,127 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
     }));
   };
 
-  // Validate form before submission
-  const validateForm = (): boolean => {
+  // Validate form data
+  const validateFormData = () => {
     const newErrors: Record<string, string> = {};
     
-    // We don't need to validate preorder_id anymore as it's generated by Supabase
-    
+    // Validate required fields
     if (!formData.customer_id) {
       newErrors.customer_id = 'Customer is required';
     }
     
-    // Flight is no longer required
+    // No need to validate preorder_id as it's generated by the database
     
-    if (!formData.order_status) {
-      newErrors.order_status = 'Status is required';
+    // Validate products - at least one product is required
+    const validProducts = products.filter(p => p.product_name.trim() !== '');
+    if (validProducts.length === 0) {
+      newErrors.products = 'At least one product is required';
     }
     
-    // Check if we have at least one product with a name
-    const hasValidProduct = products.some(product => product.product_name.trim() !== '');
-    if (!hasValidProduct) {
-      newErrors.products = 'At least one product with a name is required';
+    // Validate each product
+    validProducts.forEach((product, index) => {
+      if (!product.product_name) {
+        newErrors[`product_name_${index}`] = 'Product name is required';
+      }
+      
+      if (product.quantity <= 0) {
+        newErrors[`product_quantity_${index}`] = 'Quantity must be greater than 0';
+      }
+      
+      if (product.price <= 0) {
+        newErrors[`product_price_${index}`] = 'Price must be greater than 0';
+      }
+      
+      // Validate that advance payment is not negative
+      if ((product.advance_payment || 0) < 0) {
+        newErrors[`product_advance_${index}`] = 'Advance payment cannot be negative';
+      }
+      
+      // Validate that advance payment is not greater than the product total
+      const productTotal = product.price * product.quantity;
+      if ((product.advance_payment || 0) > productTotal) {
+        newErrors[`product_advance_${index}`] = 'Advance payment cannot exceed the product total';
+      }
+    });
+    
+    // Validate delivery charges
+    if ((formData.delivery_charges || 0) < 0) {
+      newErrors.delivery_charges = 'Delivery charges cannot be negative';
     }
     
-    // Check if all products with names have prices greater than 0
-    const invalidPricedProducts = products.filter(
-      product => product.product_name.trim() !== '' && product.price <= 0
-    );
-    
-    if (invalidPricedProducts.length > 0) {
-      newErrors.product_price = 'All products must have a price greater than 0';
-    }
-    
-    // Validate reminder data if reminder toggle is on
+    // Validate reminder if it's being added
     if (addReminder) {
-      if (!reminderData.title.trim()) {
-        newErrors.reminderTitle = 'Reminder title is required';
+      if (!reminderData.title) {
+        newErrors.reminder_title = 'Reminder title is required';
       }
       
       if (!reminderData.due_date) {
-        newErrors.reminderDueDate = 'Due date is required';
+        newErrors.reminder_due_date = 'Due date is required';
       }
     }
     
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return newErrors;
   };
 
   // Handle form submission
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!validateForm()) {
+    console.log('Submitting form...');
+    
+    // Validate form
+    const validationErrors = validateFormData();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
     
-    try {
-      // Calculate subtotal from products
-      const subtotal = products.reduce((total, product) => {
-        return total + (product.price * product.quantity);
-      }, 0);
-      
-      // Calculate remaining amount
-      const totalAmount = subtotal + (formData.cod_amount || 0);
-      const remainingAmount = totalAmount - (formData.advance_payment || 0);
-      
-      // Create updated form data with calculated values
-      const updatedFormData = {
-        ...formData,
-        subtotal,
-        total_amount: totalAmount,
-        remaining_amount: remainingAmount
+    // Calculate total amount
+    const totalAmount = (formData.subtotal || 0) + (formData.delivery_charges || 0);
+    
+    // Calculate the total advance payment for new products
+    const newProducts = products.filter(p => p.isNew && p.product_name.trim() !== '');
+    const newProductsAdvance = newProducts.reduce((sum, product) => {
+      // Handle advance_payment that might be a string due to form input
+      const advancePayment = typeof product.advance_payment === 'string'
+        ? parseFloat(product.advance_payment)
+        : (product.advance_payment || 0);
+      return sum + advancePayment;
+    }, 0);
+    
+    // Filter out any products with empty names before saving
+    const validProducts = products.filter(product => product.product_name.trim() !== '');
+    
+    // Create pre-order object with the updated data
+    const preOrderData = {
+      ...formData,
+      customer: selectedCustomer!,
+      flight: selectedFlight || undefined,
+      items: [],
+      total_amount: totalAmount,
+      // Make sure IDs are properly handled - empty strings will be converted to null in the backend
+      flight_id: formData.flight_id && formData.flight_id.trim() !== '' ? formData.flight_id : undefined,
+      // Never include preorder_id when creating a new pre-order
+      ...(formData.preorder_id && formData.preorder_id !== '' && !isNew ? { preorder_id: formData.preorder_id } : {}),
+      // Include information about new products for the parent component
+      newProductsTotal: newProducts.reduce((sum, product) => sum + (product.price * product.quantity), 0),
+      newProductsAdvance: newProductsAdvance, // Pass the advance for new products
+    } as PreOrderWithDetails & { newProductsTotal: number, newProductsAdvance: number };
+    
+    // Extract any reminder data that should be created
+    let reminderToCreate: ReminderData | undefined;
+    if (addReminder && reminderData.title && reminderData.due_date) {
+      reminderToCreate = {
+        title: reminderData.title,
+        description: reminderData.description || '',
+        due_date: reminderData.due_date,
+        priority: reminderData.priority,
+        status: reminderData.status,
       };
-      
-      // Map products to PreOrderItem format for database
-      const preOrderItems = products.map(product => ({
-        id: product.id,
-        product_name: product.product_name,
-        shade: product.shade,
-        size: product.size,
-        quantity: product.quantity,
-        price: product.price,
-        link: product.link
-      }));
-      
-      // Call onSave with the updated form data, product items, and reminder data if needed
-      onSave(
-        updatedFormData as unknown as PreOrderWithDetails, 
-        preOrderItems, 
-        addReminder ? reminderData : undefined
-      );
-    } catch (error) {
-      console.error('Error in form submission:', error);
     }
+    
+    // Pass the bank account info to the onSave function
+    onSave(preOrderData, validProducts, bankAccount, reminderToCreate);
   };
 
   // Handle customer search and selection
@@ -825,6 +829,19 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
     }
   };
 
+  // Add handler for bank account change
+  const handleBankAccountChange = (value: BankAccount) => {
+    setBankAccount(value);
+  };
+
+  // Add helper function to display numeric values
+  const displayNumericValue = (value: number | undefined): string => {
+    if (value === undefined || value === 0) {
+      return '';
+    }
+    return value.toString();
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-[800px] max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700">
@@ -927,20 +944,6 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
           )}
           
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Pre-Order ID */}
-            <div className="mb-6">
-              <Label htmlFor="preorder_id" className="block text-sm font-medium text-gray-800 dark:text-gray-200 mb-1">
-                Pre-Order ID
-              </Label>
-              <Input
-                id="preorder_id"
-                value={formData.preorder_id}
-                disabled={!isNew}
-                onChange={(e) => handleChange({ target: { name: 'preorder_id', value: e.target.value } } as React.ChangeEvent<HTMLInputElement>)}
-                className="w-full text-black dark:text-white bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:border-gray-400 dark:focus:border-gray-500 focus:ring-gray-300 dark:focus:ring-gray-500"
-              />
-            </div>
-            
             {/* Customer Selection */}
             <div className="space-y-2">
               <Label htmlFor="customer_id" className="block text-sm font-medium text-gray-800 dark:text-gray-200 mb-1.5 ml-1">
@@ -957,7 +960,6 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                     "pl-12 w-full flex justify-between items-center",
                     "rounded-xl border bg-white dark:bg-gray-700",
                     "text-gray-900 dark:text-white shadow-sm",
-                    "ring-1 ring-inset transition-all duration-200 py-3 h-12 sm:text-sm text-left",
                     errors.customer_id 
                       ? "ring-red-500 focus:ring-red-500" 
                       : "ring-gray-300/50 dark:ring-gray-600/50 focus:ring-gray-400 dark:focus:ring-gray-500 focus:ring-2"
@@ -979,7 +981,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                           value={customerSearchQuery}
                           onChange={handleCustomerSearch}
                           placeholder="Search customers..."
-                          className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-gray-400 dark:focus:ring-gray-500"
+                          className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-gray-400"
                         />
                       </div>
                     </div>
@@ -1076,7 +1078,6 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                     "pl-12 w-full flex justify-between items-center",
                     "rounded-xl border bg-white dark:bg-gray-700",
                     "text-gray-900 dark:text-white shadow-sm",
-                    "ring-1 ring-inset transition-all duration-200 py-3 h-12 sm:text-sm text-left",
                     errors.flight_id 
                       ? "ring-red-500 focus:ring-red-500" 
                       : "ring-gray-300/50 dark:ring-gray-600/50 focus:ring-gray-400 dark:focus:ring-gray-500 focus:ring-2"
@@ -1098,7 +1099,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                           value={flightSearchQuery}
                           onChange={handleFlightSearch}
                           placeholder="Search flights..."
-                          className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-gray-400 dark:focus:ring-gray-500"
+                          className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-gray-400"
                         />
                       </div>
                     </div>
@@ -1169,7 +1170,7 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                   id="order_date"
                   name="created_at"
                   type="date"
-                  value={new Date(formData.created_at).toISOString().split('T')[0]}
+                  value={new Date(formData.created_at || new Date().toISOString()).toISOString().split('T')[0]}
                   onChange={(e) => {
                     const date = new Date(e.target.value);
                     setFormData(prev => ({
@@ -1314,15 +1315,44 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                             type="number"
                             min="0"
                             step="0.01"
-                            value={product.price}
-                            onChange={(e) => handleProductChange(product.id, 'price', parseFloat(e.target.value) || 0)}
-                            className="w-full pl-12 pr-3 py-2 border border-gray-200 rounded-md bg-white text-black focus:outline-none focus:ring-1 focus:ring-gray-400"
+                            value={editingFields[`price-${product.id}`] ? product.price : displayNumericValue(product.price)}
+                            onChange={(e) => handleProductChange(product.id, 'price', e.target.value)}
+                            onFocus={() => handlePriceFocus(product.id)}
+                            onBlur={() => handlePriceBlur(product.id)}
+                            className="w-full pl-12 pr-3 py-2 border border-gray-200 rounded-md bg-white text-black focus:outline-none focus:ring-1 focus:ring-gray-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             placeholder="0.00"
                           />
                           {errors[`product_price_${index}`] && (
                             <p className="text-red-500 text-xs mt-1">{errors[`product_price_${index}`]}</p>
                           )}
                         </div>
+                      </div>
+
+                      {/* Advance Payment for All Products */}
+                      <div className="space-y-2">
+                        <Label htmlFor={`product-advance-${index}`} className="block text-xs font-medium text-blue-600 dark:text-blue-300 ml-1">
+                          Advance Payment
+                        </Label>
+                        <div className="relative rounded-md shadow-sm">
+                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-blue-600 dark:text-blue-400 pointer-events-none">
+                            PKR
+                          </span>
+                          <input
+                            id={`product-advance-${index}`}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editingFields[`advance-${product.id}`] ? (product.advance_payment ?? 0) : displayNumericValue(product.advance_payment)}
+                            onChange={(e) => handleProductChange(product.id, 'advance_payment', e.target.value)}
+                            onFocus={() => setEditingFields(prev => ({ ...prev, [`advance-${product.id}`]: true }))}
+                            onBlur={() => setEditingFields(prev => ({ ...prev, [`advance-${product.id}`]: false }))}
+                            className="w-full pl-12 pr-3 py-2 border border-blue-200 dark:border-blue-800 rounded-md bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 focus:outline-none focus:ring-1 focus:ring-blue-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 italic mt-1">
+                          Advance payment for this product
+                        </p>
                       </div>
                     </div>
                     <div className="mt-2 bg-gray-50 dark:bg-gray-800 p-2 rounded-lg">
@@ -1351,81 +1381,149 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                     <p className="text-sm text-gray-500 dark:text-gray-400">Calculated from products</p>
                   </div>
                   <div className="text-xl font-bold text-green-600 dark:text-green-400">
-                    PKR {formData.subtotal.toFixed(2)}
+                    PKR {formData.subtotal || 0}
                   </div>
                 </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="advance_payment">Advance Payment</Label>
-                  <div className="relative mt-1">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400 pointer-events-none">
-                      PKR
-                    </span>
-                    <Input
-                      id="advance_payment"
-                      name="advance_payment"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={editingFields.advance_payment ? '' : formData.advance_payment}
-                      onChange={handleChange}
-                      onFocus={handleNumberFocus}
-                      onBlur={handleNumberBlur}
-                      className="pl-12"
-                    />
-                    {errors.advance_payment && (
-                      <p className="text-red-500 text-xs mt-1">{errors.advance_payment}</p>
-                    )}
+              {/* New Products Section - Only show when editing */}
+              {!isNew && products.some(p => p.isNew) && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-4 border border-blue-100 dark:border-blue-800">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h4 className="font-medium text-blue-800 dark:text-blue-300">New Products</h4>
+                      <p className="text-sm text-blue-600 dark:text-blue-400">Products added in this edit</p>
+                    </div>
+                    <div className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                      PKR {products
+                        .filter(p => p.isNew && p.product_name.trim() !== '')
+                        .reduce((sum, p) => sum + (p.price * p.quantity), 0)}
+                    </div>
                   </div>
+                  
+                  {/* List of new products */}
+                  <div className="mt-3 space-y-2">
+                    {products
+                      .filter(p => p.isNew && p.product_name.trim() !== '')
+                      .map((product, idx) => (
+                        <div key={product.id} className="flex justify-between text-sm px-2 py-1 bg-blue-100/50 dark:bg-blue-800/30 rounded">
+                          <span className="text-blue-700 dark:text-blue-300">
+                            {product.product_name} {product.shade ? `(${product.shade})` : ''} x{product.quantity}
+                          </span>
+                          <div className="flex space-x-3">
+                            <span className="font-medium text-blue-700 dark:text-blue-300">
+                              PKR {product.price * product.quantity}
+                            </span>
+                            {(product.advance_payment ?? 0) > 0 && (
+                              <span className="font-medium text-green-600 dark:text-green-400">
+                                (Advance: PKR {product.advance_payment ?? 0})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  
+                  {/* Total advance payment for new products */}
+                  <div className="mt-4 pt-3 border-t border-blue-200 dark:border-blue-700 flex justify-between">
+                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                      Total Advance for New Products:
+                    </span>
+                    <span className="text-sm font-bold text-blue-700 dark:text-blue-300">
+                      PKR {products
+                        .filter(p => p.isNew && p.product_name.trim() !== '')
+                        .reduce((sum, p) => {
+                          const advancePayment = typeof p.advance_payment === 'string'
+                            ? parseFloat(p.advance_payment)
+                            : (p.advance_payment || 0);
+                          return sum + advancePayment;
+                        }, 0)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                {/* Only show the main delivery charges field */}
+                <div>
+                  <Label htmlFor="delivery_charges">Delivery Charges</Label>
+                  <Input
+                    type="number"
+                    id="delivery_charges"
+                    name="delivery_charges"
+                    placeholder="0"
+                    min="0"
+                    value={editingFields.delivery_charges ? formData.delivery_charges : displayNumericValue(formData.delivery_charges)}
+                    onChange={handleChange}
+                    onFocus={handleNumberFocus}
+                    onBlur={handleNumberBlur}
+                    disabled={isSubmitting}
+                    className={cn(errors.delivery_charges && "border-red-500", "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none")}
+                  />
+                  {errors.delivery_charges && (
+                    <p className="text-red-500 text-xs mt-1">{errors.delivery_charges}</p>
+                  )}
                 </div>
                 
-                <div>
-                  <Label htmlFor="cod_amount">COD Amount</Label>
-                  <div className="relative mt-1">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500 dark:text-gray-400 pointer-events-none">
-                      PKR
-                    </span>
-                    <Input
-                      id="cod_amount"
-                      name="cod_amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={editingFields.cod_amount ? '' : formData.cod_amount}
-                      onChange={handleChange}
-                      onFocus={handleNumberFocus}
-                      onBlur={handleNumberBlur}
-                      className="pl-12"
-                    />
-                    {errors.cod_amount && (
-                      <p className="text-red-500 text-xs mt-1">{errors.cod_amount}</p>
-                    )}
+                {/* Show bank account selector if any products have advance payments */}
+                {products.some(p => (p.advance_payment ?? 0) > 0) && (
+                  <div>
+                    <Label htmlFor="bank_account">Bank Account for Advance Payment</Label>
+                    <select
+                      id="bank_account"
+                      value={bankAccount}
+                      onChange={(e) => handleBankAccountChange(e.target.value as BankAccount)}
+                      disabled={isSubmitting}
+                      className="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-brand"
+                    >
+                      <option value="Ibrahim_Hbl">Ibrahim HBL</option>
+                      <option value="Fatima_hbl">Fatima HBL</option>
+                      <option value="Fatima_jazzcash">Fatima JazzCash</option>
+                      <option value="Fatima_Easypaisa">Fatima EasyPaisa</option>
+                    </select>
                   </div>
-                </div>
+                )}
               </div>
               
+              {/* Summary Amount section */}
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
                 <div className="flex justify-between items-center">
                   <div>
                     <h4 className="font-medium text-gray-900 dark:text-white">Total Amount</h4>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Subtotal + COD Amount</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Subtotal + Delivery Charges</p>
                   </div>
                   <div className="text-xl font-bold text-green-600 dark:text-green-400">
-                    PKR {(formData.subtotal + (formData.cod_amount || 0)).toFixed(2)}
+                    PKR {(formData.subtotal || 0) + (formData.delivery_charges || 0)}
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 font-normal text-right">
+                      (calculated by system)
+                    </span>
                   </div>
                 </div>
-                
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h4 className="font-medium text-gray-900 dark:text-white">Remaining Amount</h4>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Total - Advance Payment</p>
-                    </div>
-                    <div className="text-xl font-bold text-amber-600 dark:text-amber-400">
-                      PKR {((formData.subtotal + (formData.cod_amount || 0)) - (formData.advance_payment || 0)).toFixed(2)}
-                    </div>
+              </div>
+
+              {/* Add Remaining Amount Preview - This is just a preview */}
+              <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg mt-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="font-medium text-gray-900 dark:text-white">Remaining Amount</h4>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      Total Amount - Sum of Advance Payments
+                    </p>
+                  </div>
+                  <div className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                    PKR {
+                      (formData.subtotal || 0) + (formData.delivery_charges || 0) - 
+                      products.reduce((sum, p) => {
+                        // Ensure advance_payment is properly converted to a number
+                        const advancePayment = typeof p.advance_payment === 'string' 
+                          ? parseFloat(p.advance_payment) 
+                          : (p.advance_payment || 0);
+                        return sum + advancePayment;
+                      }, 0)
+                    }
+                    <span className="block text-xs text-gray-500 dark:text-gray-400 font-normal text-right">
+                      (calculated by system)
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1493,10 +1591,10 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                     value={reminderData.title}
                     onChange={(e) => setReminderData({ ...reminderData, title: e.target.value })}
                     placeholder="Enter reminder title"
-                    className="w-full bg-white dark:bg-gray-700 text-black dark:text-white border-gray-200 dark:border-gray-600 focus:border-gray-400 dark:focus:border-gray-500 focus:ring-gray-300 dark:focus:ring-gray-500"
+                    className="w-full bg-white dark:bg-gray-700 text-black dark:text-white border-gray-200 dark:border-gray-600 focus:border-gray-400 dark:focus:border-gray-500"
                   />
-                  {errors.reminderTitle && (
-                    <p className="mt-1 text-sm text-red-500 dark:text-red-400">{errors.reminderTitle}</p>
+                  {errors.reminder_title && (
+                    <p className="mt-1 text-sm text-red-500 dark:text-red-400">{errors.reminder_title}</p>
                   )}
                 </div>
                 
@@ -1526,8 +1624,8 @@ const PreOrderAddEditModal: React.FC<PreOrderAddEditModalProps> = ({
                     onChange={(e) => setReminderData({ ...reminderData, due_date: e.target.value })}
                     className="w-full bg-white dark:bg-gray-700 text-black dark:text-white border-gray-200 dark:border-gray-600 focus:border-gray-400 dark:focus:border-gray-500 focus:ring-gray-300 dark:focus:ring-gray-500"
                   />
-                  {errors.reminderDueDate && (
-                    <p className="mt-1 text-sm text-red-500 dark:text-red-400">{errors.reminderDueDate}</p>
+                  {errors.reminder_due_date && (
+                    <p className="mt-1 text-sm text-red-500 dark:text-red-400">{errors.reminder_due_date}</p>
                   )}
                 </div>
                 

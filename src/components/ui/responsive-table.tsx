@@ -12,6 +12,7 @@ interface Column<T> {
   sortable?: boolean;
   mobileLabel?: string;
   hidden?: boolean;
+  width?: string;
 }
 
 interface ResponsiveTableProps<T> {
@@ -25,6 +26,7 @@ interface ResponsiveTableProps<T> {
     currentPage: number;
     totalPages: number;
     onPageChange: (page: number) => void;
+    pageSize?: number;
   };
   sorting?: {
     column: string;
@@ -90,7 +92,7 @@ export function ResponsiveTable<T>({
   if (isMobile && showMobileCards) {
     return (
       <div className="space-y-4 animate-fade-in">
-        {data.map((row) => (
+        {data.map((row, index) => (
           <div 
             key={String(row[keyField])} 
             className={cn(
@@ -100,19 +102,30 @@ export function ResponsiveTable<T>({
             )}
             onClick={() => onRowClick && onRowClick(row)}
           >
+            <div className="mobile-card-header flex justify-between items-center mb-2">
+              <span className="text-sm font-medium bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-300 px-2 py-1 rounded-full">
+                #{index + 1 + ((pagination?.currentPage || 1) - 1) * (pagination?.pageSize || 10)}
+              </span>
+            </div>
+            
             {columns
-              .filter(col => !col.hidden)
-              .map((column, index) => {
+              .filter(col => !col.hidden && col.header !== 'Sr #' && col.header !== 'Select')
+              .map((column, colIndex) => {
                 const value = typeof column.accessor === 'function' 
                   ? column.accessor(row) 
                   : row[column.accessor];
                 
+                // Simpler check for interactive content
+                const isInteractive = value && React.isValidElement(value) && 
+                  (column.header === 'Status' || column.header === 'Flight' || column.header === 'Actions');
+                
                 return (
-                  <div key={index} className="mobile-card-row">
+                  <div key={colIndex} className="mobile-card-row">
                     <span className="mobile-card-label">
                       {column.mobileLabel || column.header}:
                     </span>
-                    <span className="mobile-card-value">
+                    <span className={`mobile-card-value ${isInteractive ? 'interactive-content' : ''}`}
+                          onClick={isInteractive ? (e) => e.stopPropagation() : undefined}>
                       {value as React.ReactNode}
                     </span>
                   </div>
@@ -209,7 +222,14 @@ export function ResponsiveTable<T>({
                       : row[column.accessor];
                     
                     return (
-                      <td key={index} className={cn("px-6 py-4 whitespace-nowrap text-sm", column.className)}>
+                      <td 
+                        key={index} 
+                        className={cn(
+                          "py-4 px-2 whitespace-nowrap text-sm",
+                          column.className
+                        )}
+                        style={column.width && !column.className ? { width: column.width } : undefined}
+                      >
                         {value as React.ReactNode}
                       </td>
                     );

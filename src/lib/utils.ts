@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { OrderStatus, FlightStatus } from "./types"
+import { OrderStatus, FlightStatus, PreOrderWithDetails, PreOrderItem } from "./types"
 
 /**
  * Utility function for merging Tailwind CSS classes
@@ -134,48 +134,54 @@ export const exportPreOrdersToCSV = (preOrders: any[]) => {
   // Define the fields we want to export
   const fields = [
     'preorder_id',
-    'customer.name',
-    'customer.instagram_id',
-    'customer.address',
-    'customer.phone_number',
-    'customer.city',
+    'customer_name',
+    'phone_number',
+    'flight_name',
+    'order_status',
+    'delivery_charges',
     'subtotal',
-    'advance_payment',
-    'total_amount'
+    'total_amount',
+    'remaining_amount',
+    'product_details',
+    'created_at'
   ];
 
   // Create CSV header
   const header = [
     'Pre-Order ID',
     'Customer Name',
-    'Instagram ID',
-    'Address',
     'Phone Number',
-    'City',
+    'Flight Name',
+    'Order Status',
+    'Delivery Charges (PKR)',
     'Subtotal (PKR)',
-    'Advance Payment (PKR)',
-    'Total Amount (PKR)'
+    'Total Amount (PKR)',
+    'Remaining Amount (PKR)',
+    'Product Details',
+    'Created At'
   ];
 
   // Convert data to CSV format
-  const csvData = preOrders.map(order => {
-    return [
-      order.preorder_id,
-      order.customer?.name || '',
-      order.customer?.instagram_id || '',
-      order.customer?.address || '',
-      order.customer?.phone_number || '',
-      order.customer?.city || '',
-      order.subtotal || 0,
-      order.advance_payment || 0,
-      (order.subtotal || 0) - (order.advance_payment || 0)
-    ];
-  });
+  const formattedData = preOrders.map(order => ({
+    preorder_id: order.preorder_id,
+    customer_name: order.customer?.name || 'N/A',
+    phone_number: order.customer?.phone_number || 'N/A',
+    flight_name: order.flight?.flight_name || 'N/A',
+    order_status: order.order_status,
+    delivery_charges: order.delivery_charges || 0,
+    subtotal: order.subtotal || 0,
+    total_amount: order.total_amount || (order.subtotal || 0) + (order.delivery_charges || 0),
+    remaining_amount: order.remaining_amount || 0,
+    product_details: order.items?.map((item: PreOrderItem) => 
+      `${item.product_name} (${item.quantity}x) - ${formatCurrency(item.price)}`
+    ).join('; ') || 'No products',
+    created_at: formatDate(order.created_at)
+  }));
 
   // Combine header and data
   const csvContent = [
     header.join(','),
-    ...csvData.map(row => row.join(','))
+    ...formattedData.map(row => Object.values(row).join(','))
   ].join('\n');
 
   // Create blob and download

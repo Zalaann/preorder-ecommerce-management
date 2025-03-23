@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { PaymentWithDetails, PaymentPurpose, Customer } from '@/lib/types';
 import { formatDate, formatCurrency } from '@/lib/utils';
-import { getPayments, getCustomers } from '@/lib/api';
+import { getPaymentsWithPagination, getCustomers } from '@/lib/api';
 import { 
   Search, 
   Calendar, 
@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import PaymentDetailModal from '@/components/payments/PaymentDetailModal';
 import PaymentAddEditModal from '@/components/payments/PaymentAddEditModal';
 import PaymentDeleteModal from '@/components/payments/PaymentDeleteModal';
+import ImprovedPaymentModal from '@/components/payments/ImprovedPaymentModal';
 
 const PaymentsManagementPage = () => {
   const router = useRouter();
@@ -38,13 +39,11 @@ const PaymentsManagementPage = () => {
   const [purposeFilter, setPurposeFilter] = useState<string>('');
   const [customerFilter, setCustomerFilter] = useState<string>('');
   
-  // State for pagination
+  // State for pagination (server-side)
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
-  const [itemsPerPage] = useState(10);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage - 1;
+  const [itemsPerPage] = useState(20);
   
   // State for sorting
   const [sortColumn, setSortColumn] = useState<string>('payment_date');
@@ -69,29 +68,30 @@ const PaymentsManagementPage = () => {
       }
       
       // Load initial data
-      loadData();
+      loadData(1);
       loadCustomers();
     };
     
     checkUser();
   }, [router]);
   
-  // Load payments data
-  const loadData = useCallback(async () => {
+  // Load payments data with pagination
+  const loadData = useCallback(async (page: number) => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await getPayments();
+      const response = await getPaymentsWithPagination(page, itemsPerPage);
       if (response.error) {
         throw response.error;
       }
       
-      // Cast the data to PaymentWithDetails[] since the API returns the correct structure
-      const paymentsWithDetails = response.data as unknown as PaymentWithDetails[];
-      setPayments(paymentsWithDetails || []);
-      setTotalItems((paymentsWithDetails || []).length);
-      setTotalPages(Math.ceil((paymentsWithDetails || []).length / itemsPerPage));
+      if (response.data) {
+        setPayments(response.data.payments);
+        setTotalItems(response.data.count);
+        setTotalPages(Math.ceil(response.data.count / itemsPerPage));
+        setCurrentPage(page);
+      }
     } catch (error) {
       console.error('Error loading payments:', error);
       setError(error instanceof Error ? error.message : 'Failed to load payments');
@@ -113,23 +113,9 @@ const PaymentsManagementPage = () => {
     }
   };
   
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-  
-  // Handle sorting
-  const handleSort = (column: string) => {
-    if (column === sortColumn) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-  
-  // Handle pagination
-  const handlePageChange = (newPage: number) => {
-    setCurrentPage(newPage);
+  // Handle page change
+  const handlePageChange = (page: number) => {
+    loadData(page);
   };
   
   // Handle opening detail modal
@@ -156,93 +142,17 @@ const PaymentsManagementPage = () => {
     setIsDeleteModalOpen(true);
   };
   
-  useEffect(() => {
-    // Get tally filter from URL parameters
-    const tallyFilter = searchParams.get('tally');
-    if (tallyFilter === 'false') {
-      // Set filter to show only untallied payments
-      setCustomerFilter('');
-      setPurposeFilter('');
-      setDateRange('');
-      setSearchQuery('');
+  // For sorting - we'll sort on the server side in future updates
+  const handleSort = (column: string) => {
+    if (column === sortColumn) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
     }
-  }, [searchParams]);
-  
-  // Filter payments based on search and filters
-  const filteredPayments = payments.filter(payment => {
-    // Search query filter
-    const searchFields = [
-      payment.customer?.name || '',
-      payment.customer?.phone_number || '',
-      payment.preorder?.preorder_id || '',
-      payment.payment_id || '',
-      payment.payment_purpose || '',
-    ];
-    
-    const matchesSearch = searchQuery === '' || 
-      searchFields.some(field => 
-        field.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    
-    // Customer filter
-    const matchesCustomer = customerFilter === '' || 
-      payment.customer_id === customerFilter;
-    
-    // Purpose filter
-    const matchesPurpose = purposeFilter === '' || 
-      payment.payment_purpose === purposeFilter;
-    
-    // Date range filter
-    const matchesDate = dateRange === '' || 
-      payment.payment_date.includes(dateRange);
-
-    // Tally filter from URL
-    const tallyFilter = searchParams.get('tally');
-    const matchesTally = tallyFilter === 'false' ? !payment.tally : true;
-    
-    return matchesSearch && matchesCustomer && matchesPurpose && matchesDate && matchesTally;
-  });
-  
-  // Sort payments
-  const sortedPayments = [...filteredPayments].sort((a, b) => {
-    let aValue = a[sortColumn as keyof PaymentWithDetails];
-    let bValue = b[sortColumn as keyof PaymentWithDetails];
-    
-    // Handle nested properties
-    if (sortColumn === 'customer_name') {
-      aValue = a.customer?.name || '';
-      bValue = b.customer?.name || '';
-    } else if (sortColumn === 'preorder_id') {
-      aValue = a.preorder?.preorder_id || '';
-      bValue = b.preorder?.preorder_id || '';
-    }
-    
-    // Handle string comparison
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
-      return sortDirection === 'asc' 
-        ? aValue.localeCompare(bValue) 
-        : bValue.localeCompare(aValue);
-    }
-    
-    // Handle number comparison
-    if (typeof aValue === 'number' && typeof bValue === 'number') {
-      return sortDirection === 'asc' 
-        ? aValue - bValue 
-        : bValue - aValue;
-    }
-    
-    // Handle date comparison
-    if (aValue instanceof Date && bValue instanceof Date) {
-      return sortDirection === 'asc' 
-        ? aValue.getTime() - bValue.getTime() 
-        : bValue.getTime() - aValue.getTime();
-    }
-    
-    return 0;
-  });
-  
-  // Paginate payments
-  const paginatedPayments = sortedPayments.slice(startIndex, endIndex + 1);
+    // For now just re-load the current page
+    loadData(currentPage);
+  };
   
   // Get sort indicator
   const getSortIndicator = (column: string) => {
@@ -266,8 +176,8 @@ const PaymentsManagementPage = () => {
         return 'Advance Payment';
       case 'final_remaining':
         return 'Final Remaining Payment';
-      case 'cod':
-        return 'Cash on Delivery';
+      case 'delivery_charges':
+        return 'Delivery Charges';
       default:
         return purpose;
     }
@@ -286,7 +196,7 @@ const PaymentsManagementPage = () => {
         </Button>
       </div>
       
-      {/* Search and Filters */}
+      {/* Search and Filters - these will be implemented on the server-side in future updates */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
@@ -446,15 +356,19 @@ const PaymentsManagementPage = () => {
                     </div>
                   </td>
                 </tr>
-              ) : paginatedPayments.length === 0 ? (
+              ) : payments.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
                     No payments found
                   </td>
                 </tr>
               ) : (
-                paginatedPayments.map((payment) => (
-                  <tr key={payment.payment_id} className="hover:bg-gray-50">
+                payments.map((payment) => (
+                  <tr 
+                    key={payment.payment_id} 
+                    className="hover:bg-gray-50 cursor-pointer" 
+                    onClick={() => handleViewPayment(payment)}
+                  >
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatDate(payment.payment_date)}
                     </td>
@@ -482,7 +396,10 @@ const PaymentsManagementPage = () => {
                       {payment.payment_screenshot ? (
                         <div 
                           className="cursor-pointer" 
-                          onClick={() => handleViewPayment(payment)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewPayment(payment);
+                          }}
                         >
                           <div className="h-10 w-10 rounded border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center">
                             <img 
@@ -504,19 +421,28 @@ const PaymentsManagementPage = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button
-                        onClick={() => handleViewPayment(payment)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewPayment(payment);
+                        }}
                         className="text-indigo-600 hover:text-indigo-900 mr-3"
                       >
                         <Eye className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleEditPayment(payment)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditPayment(payment);
+                        }}
                         className="text-blue-600 hover:text-blue-900 mr-3"
                       >
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => handleDeletePayment(payment)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePayment(payment);
+                        }}
                         className="text-red-600 hover:text-red-900"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -534,11 +460,8 @@ const PaymentsManagementPage = () => {
       {totalPages > 1 && (
         <div className="flex justify-between items-center">
           <div className="text-sm text-gray-700">
-            Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
-            <span className="font-medium">
-              {Math.min(endIndex + 1, totalItems)}
-            </span>{' '}
-            of <span className="font-medium">{totalItems}</span> payments
+            Showing <span className="font-medium">{payments.length}</span> of{' '}
+            <span className="font-medium">{totalItems}</span> payments
           </div>
           <div className="flex space-x-2">
             <Button
@@ -549,16 +472,30 @@ const PaymentsManagementPage = () => {
             >
               Previous
             </Button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-              <Button
-                key={page}
-                onClick={() => handlePageChange(page)}
-                variant={currentPage === page ? 'default' : 'outline'}
-                size="sm"
-              >
-                {page}
-              </Button>
-            ))}
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              // Show pages around current page
+              let pageNumber;
+              if (totalPages <= 5) {
+                pageNumber = i + 1;
+              } else if (currentPage <= 3) {
+                pageNumber = i + 1;
+              } else if (currentPage >= totalPages - 2) {
+                pageNumber = totalPages - 4 + i;
+              } else {
+                pageNumber = currentPage - 2 + i;
+              }
+              
+              return (
+                <Button
+                  key={pageNumber}
+                  onClick={() => handlePageChange(pageNumber)}
+                  variant={currentPage === pageNumber ? 'default' : 'outline'}
+                  size="sm"
+                >
+                  {pageNumber}
+                </Button>
+              );
+            })}
             <Button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={currentPage === totalPages}
@@ -581,7 +518,7 @@ const PaymentsManagementPage = () => {
       )}
       
       {(isAddModalOpen || isEditModalOpen) && (
-        <PaymentAddEditModal
+        <ImprovedPaymentModal
           payment={selectedPayment}
           isOpen={isAddModalOpen || isEditModalOpen}
           onClose={() => {
@@ -589,7 +526,7 @@ const PaymentsManagementPage = () => {
             setIsEditModalOpen(false);
           }}
           onSave={() => {
-            loadData();
+            loadData(currentPage);
             setIsAddModalOpen(false);
             setIsEditModalOpen(false);
           }}
@@ -603,7 +540,7 @@ const PaymentsManagementPage = () => {
           isOpen={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
           onDelete={() => {
-            loadData();
+            loadData(currentPage);
             setIsDeleteModalOpen(false);
           }}
         />
